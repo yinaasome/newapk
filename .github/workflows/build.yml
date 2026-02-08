@@ -1,594 +1,96 @@
 name: Build Android APK
 
-on: 
-  push:
-    branches: [main, master]
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
     
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.10'
     
-    - name: Install dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip build-essential git zip unzip
-        sudo apt-get install -y zlib1g-dev libncurses5-dev libncursesw5-dev libffi-dev
-        pip3 install --upgrade pip setuptools
-        pip3 install Cython==0.29.36
-        pip3 install buildozer==1.5.0
+        sudo apt-get install -y \
+          python3-pip \
+          build-essential \
+          git \
+          ffmpeg \
+          libsdl2-dev \
+          libsdl2-image-dev \
+          libsdl2-mixer-dev \
+          libsdl2-ttf-dev \
+          libportmidi-dev \
+          libswscale-dev \
+          libavformat-dev \
+          libavcodec-dev \
+          zlib1g-dev \
+          libgstreamer1.0 \
+          gstreamer1.0-plugins-base \
+          gstreamer1.0-plugins-good
     
-    - name: Create main.py
+    - name: Install Python dependencies
       run: |
-        cat > main.py << 'ENDOFFILE'
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Application Mobile Money - Version Responsive
-"""
-import sqlite3
-import hashlib
-from datetime import datetime
-from kivy.app import App
-from kivy.uix.screenmanager import ScreenManager, Screen, FadeTransition
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
-from kivy.uix.spinner import Spinner
-from kivy.uix.popup import Popup
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.widget import Widget
-from kivy.core.window import Window
-from kivy.metrics import dp, sp
-from kivy.graphics import Color, Rectangle, RoundedRectangle
-from kivy.properties import ObjectProperty
-from kivy.clock import Clock
-from kivy.utils import platform
-
-IS_MOBILE = platform in ['android', 'ios']
-
-COLORS = {
-    'PRIMARY': [0.129, 0.588, 0.953, 1],
-    'SECONDARY': [0.961, 0.341, 0.133, 1],
-    'BACKGROUND': [0.95, 0.95, 0.95, 1],
-    'TEXT': [0.2, 0.2, 0.2, 1],
-    'WHITE': [1, 1, 1, 1],
-    'ERROR': [0.9, 0.1, 0.1, 1],
-    'SUCCESS': [0.2, 0.7, 0.2, 1],
-    'GRAY': [0.5, 0.5, 0.5, 1]
-}
-
-OPERATORS = ['Orange Money', 'Moov Money', 'Telecel', 'Wave', 'TNT']
-
-class ResponsiveHelper:
-    _instance = None
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init()
-        return cls._instance
-    
-    def _init(self):
-        self.screen_width = Window.width
-        self.screen_height = Window.height
-        self.is_small_screen = self.screen_width < dp(360)
-        self.is_tablet = self.screen_width > dp(600)
-        Window.bind(on_resize=self._on_resize)
-    
-    def _on_resize(self, window, width, height):
-        self.screen_width = width
-        self.screen_height = height
-        self.is_small_screen = width < dp(360)
-        self.is_tablet = width > dp(600)
-    
-    def get_padding(self):
-        if self.is_small_screen:
-            return [dp(10), dp(10)]
-        elif self.is_tablet:
-            return [dp(40), dp(40)]
-        return [dp(20), dp(20)]
-    
-    def get_spacing(self):
-        if self.is_small_screen:
-            return dp(8)
-        elif self.is_tablet:
-            return dp(20)
-        return dp(12)
-    
-    def get_font_size(self, base_size):
-        if self.is_small_screen:
-            return sp(base_size * 0.85)
-        elif self.is_tablet:
-            return sp(base_size * 1.1)
-        return sp(base_size)
-    
-    def get_button_height(self):
-        if self.is_small_screen:
-            return dp(44)
-        elif self.is_tablet:
-            return dp(60)
-        return dp(50)
-    
-    def get_input_height(self):
-        if self.is_small_screen:
-            return dp(40)
-        elif self.is_tablet:
-            return dp(55)
-        return dp(45)
-
-responsive = ResponsiveHelper()
-
-class ResponsiveButton(Button):
-    def __init__(self, **kwargs):
-        bg_color = kwargs.pop('bg_color', COLORS['PRIMARY'])
-        super().__init__(**kwargs)
-        self.background_color = [0, 0, 0, 0]
-        self.background_normal = ''
-        self.background_down = ''
-        self.bold = True
-        self.color = COLORS['WHITE']
-        self.size_hint_y = None
-        self.height = responsive.get_button_height()
-        self.font_size = responsive.get_font_size(16)
-        with self.canvas.before:
-            Color(*bg_color)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12),])
-        self.bind(pos=self._update_rect, size=self._update_rect)
-    
-    def _update_rect(self, *args):
-        self.rect.pos = self.pos
-        self.rect.size = self.size
-
-class ResponsiveInput(TextInput):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.multiline = False
-        self.size_hint_y = None
-        self.height = responsive.get_input_height()
-        self.font_size = responsive.get_font_size(16)
-        self.padding = [dp(15), (self.height - self.font_size) / 2]
-        self.background_color = COLORS['WHITE']
-        self.foreground_color = COLORS['TEXT']
-        self.cursor_color = COLORS['PRIMARY']
-        self.selection_color = [*COLORS['PRIMARY'][:3], 0.3]
-        with self.canvas.before:
-            Color(0.8, 0.8, 0.8, 1)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(8),])
-        self.bind(pos=self._update_rect, size=self._update_rect, focus=self._on_focus)
-    
-    def _update_rect(self, *args):
-        self.rect.pos = self.pos
-        self.rect.size = self.size
-    
-    def _on_focus(self, instance, value):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            if value:
-                Color(*COLORS['PRIMARY'])
-            else:
-                Color(0.8, 0.8, 0.8, 1)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(8),])
-
-class Card(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.padding = responsive.get_padding()
-        self.spacing = responsive.get_spacing()
-        with self.canvas.before:
-            Color(*COLORS['WHITE'])
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(15),])
-        self.bind(pos=self._update_rect, size=self._update_rect)
-    
-    def _update_rect(self, *args):
-        self.rect.pos = self.pos
-        self.rect.size = self.size
-
-class DatabaseManager:
-    DB_NAME = 'mobile_money.db'
-    
-    @classmethod
-    def init_database(cls):
-        conn = sqlite3.connect(cls.DB_NAME)
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            agent_id INTEGER,
-            operator TEXT NOT NULL,
-            type TEXT NOT NULL,
-            amount REAL NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        c.execute("SELECT * FROM users WHERE username='admin'")
-        if not c.fetchone():
-            hashed = hashlib.sha256('admin123'.encode()).hexdigest()
-            c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-                     ('admin', hashed, 'admin'))
-        conn.commit()
-        conn.close()
-    
-    @classmethod
-    def get_user(cls, username, password):
-        conn = sqlite3.connect(cls.DB_NAME)
-        c = conn.cursor()
-        hashed = hashlib.sha256(password.encode()).hexdigest()
-        c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, hashed))
-        user = c.fetchone()
-        conn.close()
-        return user
-
-class BaseScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        with self.canvas.before:
-            Color(*COLORS['BACKGROUND'])
-            self.bg_rect = Rectangle(size=self.size, pos=self.pos)
-        self.bind(pos=self._update_bg, size=self._update_bg)
-    
-    def _update_bg(self, *args):
-        self.bg_rect.pos = self.pos
-        self.bg_rect.size = self.size
-    
-    def show_popup(self, title, message, msg_type='ERROR'):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        icon_color = COLORS['SUCCESS'] if msg_type == 'SUCCESS' else COLORS['ERROR']
-        icon_text = '✓' if msg_type == 'SUCCESS' else '✕'
-        content.add_widget(Label(text=icon_text, font_size=sp(40), color=icon_color, size_hint_y=None, height=dp(50)))
-        content.add_widget(Label(text=message, font_size=responsive.get_font_size(16), color=COLORS['TEXT']))
-        btn = ResponsiveButton(text='OK', bg_color=COLORS['PRIMARY'], size_hint_y=None, height=responsive.get_button_height())
-        popup = Popup(title=title, content=content, size_hint=(0.85, None), height=dp(250), title_color=COLORS['PRIMARY'])
-        btn.bind(on_press=popup.dismiss)
-        content.add_widget(btn)
-        popup.open()
-
-class LoginScreen(BaseScreen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.setup_ui()
-    
-    def setup_ui(self):
-        root = ScrollView(size_hint=(1, 1))
-        container = BoxLayout(orientation='vertical', size_hint_y=None, padding=responsive.get_padding(), spacing=responsive.get_spacing())
-        container.bind(minimum_height=container.setter('height'))
-        
-        header = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(120), spacing=dp(5))
-        header.add_widget(Label(text='MOBILE MONEY', font_size=responsive.get_font_size(32), bold=True, color=COLORS['PRIMARY']))
-        header.add_widget(Label(text='Gestion des transactions', font_size=responsive.get_font_size(14), color=COLORS['GRAY']))
-        container.add_widget(header)
-        
-        card = Card(size_hint_y=None, height=dp(350))
-        form = BoxLayout(orientation='vertical', spacing=responsive.get_spacing(), padding=[dp(10), dp(20)])
-        
-        form.add_widget(Label(text="Nom d'utilisateur", font_size=responsive.get_font_size(14), color=COLORS['TEXT'], size_hint_y=None, height=dp(30)))
-        self.username = ResponsiveInput(hint_text="Entrez votre nom d'utilisateur")
-        form.add_widget(self.username)
-        
-        form.add_widget(Label(text="Mot de passe", font_size=responsive.get_font_size(14), color=COLORS['TEXT'], size_hint_y=None, height=dp(30)))
-        self.password = ResponsiveInput(hint_text="Entrez votre mot de passe", password=True)
-        form.add_widget(self.password)
-        
-        form.add_widget(Widget(size_hint_y=0.3))
-        form.add_widget(ResponsiveButton(text='SE CONNECTER', bg_color=COLORS['PRIMARY'], on_press=self.authenticate))
-        form.add_widget(Label(text='v1.0.0', font_size=responsive.get_font_size(12), color=COLORS['GRAY'], size_hint_y=None, height=dp(20)))
-        
-        card.add_widget(form)
-        container.add_widget(card)
-        root.add_widget(container)
-        self.add_widget(root)
-    
-    def authenticate(self, instance):
-        username = self.username.text.strip()
-        password = self.password.text.strip()
-        if not username or not password:
-            self.show_popup('Erreur', 'Veuillez remplir tous les champs')
-            return
-        user = DatabaseManager.get_user(username, password)
-        if user:
-            app = App.get_running_app()
-            app.current_user = {'id': user[0], 'username': user[1], 'role': user[3]}
-            self.manager.current = 'menu' if user[3] != 'admin' else 'admin_menu'
-            self.username.text = ''
-            self.password.text = ''
-        else:
-            self.show_popup('Erreur', 'Identifiants incorrects')
-
-class MenuScreen(BaseScreen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.setup_ui()
-    
-    def setup_ui(self):
-        root = ScrollView(size_hint=(1, 1))
-        container = BoxLayout(orientation='vertical', size_hint_y=None, padding=responsive.get_padding(), spacing=responsive.get_spacing())
-        container.bind(minimum_height=container.setter('height'))
-        
-        header = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(100), spacing=dp(5))
-        header.add_widget(Label(text='Bienvenue,', font_size=responsive.get_font_size(16), color=COLORS['GRAY']))
-        self.user_label = Label(text='Agent', font_size=responsive.get_font_size(24), bold=True, color=COLORS['PRIMARY'])
-        header.add_widget(self.user_label)
-        header.add_widget(Label(text='Espace Agent', font_size=responsive.get_font_size(14), color=COLORS['SECONDARY']))
-        container.add_widget(header)
-        
-        grid = GridLayout(cols=2 if responsive.screen_width > dp(400) else 1, spacing=responsive.get_spacing(), size_hint_y=None, height=dp(300))
-        buttons = [
-            ('💰 DÉPÔT', COLORS['PRIMARY'], self.go_deposit),
-            ('💸 RETRAIT', COLORS['SECONDARY'], self.go_withdrawal),
-            ('📊 STATS', COLORS['PRIMARY'], self.go_stats),
-            ('🚪 EXIT', [0.6, 0.6, 0.6, 1], self.logout)
-        ]
-        for text, color, callback in buttons:
-            grid.add_widget(ResponsiveButton(text=text, bg_color=color, on_press=callback))
-        
-        container.add_widget(grid)
-        root.add_widget(container)
-        self.add_widget(root)
-    
-    def on_enter(self):
-        app = App.get_running_app()
-        if app.current_user:
-            self.user_label.text = app.current_user['username']
-    
-    def go_deposit(self, instance):
-        self.manager.get_screen('transaction').transaction_type = 'Dépôt'
-        self.manager.current = 'transaction'
-    
-    def go_withdrawal(self, instance):
-        self.manager.get_screen('transaction').transaction_type = 'Retrait'
-        self.manager.current = 'transaction'
-    
-    def go_stats(self, instance):
-        self.show_popup('Info', 'Statistiques - À implémenter', 'SUCCESS')
-    
-    def logout(self, instance):
-        App.get_running_app().current_user = None
-        self.manager.current = 'login'
-
-class TransactionScreen(BaseScreen):
-    transaction_type = ObjectProperty('')
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.setup_ui()
-    
-    def setup_ui(self):
-        root = ScrollView(size_hint=(1, 1))
-        container = BoxLayout(orientation='vertical', size_hint_y=None, padding=responsive.get_padding(), spacing=responsive.get_spacing())
-        container.bind(minimum_height=container.setter('height'))
-        
-        self.header_label = Label(text='', font_size=responsive.get_font_size(28), bold=True, color=COLORS['PRIMARY'], size_hint_y=None, height=dp(60))
-        container.add_widget(self.header_label)
-        
-        card = Card(size_hint_y=None, height=dp(400))
-        form = BoxLayout(orientation='vertical', spacing=responsive.get_spacing(), padding=[dp(10), dp(20)])
-        
-        form.add_widget(Label(text='Opérateur', font_size=responsive.get_font_size(14), color=COLORS['TEXT'], size_hint_y=None, height=dp(30)))
-        self.operator_spinner = Spinner(text='Sélectionnez', values=OPERATORS, size_hint_y=None, height=responsive.get_input_height())
-        form.add_widget(self.operator_spinner)
-        
-        form.add_widget(Label(text='Montant (XOF)', font_size=responsive.get_font_size(14), color=COLORS['TEXT'], size_hint_y=None, height=dp(30)))
-        self.amount_input = ResponsiveInput(hint_text='0', input_filter='float')
-        form.add_widget(self.amount_input)
-        
-        form.add_widget(Widget(size_hint_y=0.5))
-        
-        btn_layout = BoxLayout(size_hint_y=None, height=responsive.get_button_height(), spacing=dp(10))
-        btn_layout.add_widget(ResponsiveButton(text='VALIDER', bg_color=COLORS['PRIMARY'], on_press=self.save_transaction))
-        btn_layout.add_widget(ResponsiveButton(text='ANNULER', bg_color=[0.6, 0.6, 0.6, 1], on_press=self.go_back))
-        form.add_widget(btn_layout)
-        
-        card.add_widget(form)
-        container.add_widget(card)
-        root.add_widget(container)
-        self.add_widget(root)
-    
-    def on_transaction_type(self, instance, value):
-        self.header_label.text = value.upper()
-        self.header_label.color = COLORS['PRIMARY'] if value == 'Dépôt' else COLORS['SECONDARY']
-    
-    def save_transaction(self, instance):
-        operator = self.operator_spinner.text
-        amount_str = self.amount_input.text.strip()
-        
-        if operator == 'Sélectionnez':
-            self.show_popup('Erreur', 'Veuillez sélectionner un opérateur')
-            return
-        
-        try:
-            amount = float(amount_str)
-            if amount <= 0 or amount > 10000000:
-                raise ValueError()
-        except ValueError:
-            self.show_popup('Erreur', 'Montant invalide (max 10 000 000 XOF)')
-            return
-        
-        app = App.get_running_app()
-        conn = sqlite3.connect('mobile_money.db')
-        c = conn.cursor()
-        c.execute("INSERT INTO transactions (agent_id, operator, type, amount) VALUES (?, ?, ?, ?)",
-                 (app.current_user['id'], operator, self.transaction_type, amount))
-        conn.commit()
-        conn.close()
-        
-        self.show_popup('Succès', f'{self.transaction_type} de {amount:,.0f} XOF enregistré!', 'SUCCESS')
-        self.amount_input.text = ''
-        self.operator_spinner.text = 'Sélectionnez'
-    
-    def go_back(self, instance):
-        self.manager.current = 'menu'
-
-class AdminMenuScreen(BaseScreen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.setup_ui()
-    
-    def setup_ui(self):
-        root = ScrollView(size_hint=(1, 1))
-        container = BoxLayout(orientation='vertical', size_hint_y=None, padding=responsive.get_padding(), spacing=responsive.get_spacing())
-        container.bind(minimum_height=container.setter('height'))
-        
-        header = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(100), spacing=dp(5))
-        header.add_widget(Label(text='ADMINISTRATION', font_size=responsive.get_font_size(28), bold=True, color=COLORS['PRIMARY']))
-        header.add_widget(Label(text='Espace Gestionnaire', font_size=responsive.get_font_size(14), color=COLORS['SECONDARY']))
-        container.add_widget(header)
-        
-        grid = GridLayout(cols=1, spacing=responsive.get_spacing(), size_hint_y=None, height=dp(320))
-        buttons = [
-            ('👤 NOUVEL AGENT', COLORS['PRIMARY'], self.show_register),
-            ('💼 SOLDES', COLORS['SECONDARY'], self.show_balance),
-            ('📊 STATS', COLORS['PRIMARY'], self.show_stats),
-            ('🚪 DÉCONNEXION', [0.6, 0.6, 0.6, 1], self.logout)
-        ]
-        for text, color, callback in buttons:
-            grid.add_widget(ResponsiveButton(text=text, bg_color=color, on_press=callback))
-        
-        container.add_widget(grid)
-        root.add_widget(container)
-        self.add_widget(root)
-    
-    def show_register(self, instance):
-        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=responsive.get_spacing())
-        content.add_widget(Label(text='Nouvel Agent', font_size=responsive.get_font_size(20), bold=True, color=COLORS['PRIMARY']))
-        
-        username = ResponsiveInput(hint_text="Nom d'utilisateur")
-        content.add_widget(username)
-        
-        password = ResponsiveInput(hint_text="Mot de passe", password=True)
-        content.add_widget(password)
-        
-        error_label = Label(text='', color=COLORS['ERROR'], size_hint_y=None, height=dp(30))
-        content.add_widget(error_label)
-        
-        def do_register(x):
-            user = username.text.strip()
-            pwd = password.text.strip()
-            if not user or not pwd:
-                error_label.text = 'Tous les champs requis'
-                return
-            conn = sqlite3.connect('mobile_money.db')
-            c = conn.cursor()
-            hashed = hashlib.sha256(pwd.encode()).hexdigest()
-            try:
-                c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (user, hashed, 'agent'))
-                conn.commit()
-                popup.dismiss()
-                self.show_popup('Succès', f'Agent {user} créé!', 'SUCCESS')
-            except sqlite3.IntegrityError:
-                error_label.text = "Nom d'utilisateur existe déjà"
-            finally:
-                conn.close()
-        
-        btn_layout = BoxLayout(size_hint_y=None, height=responsive.get_button_height(), spacing=dp(10))
-        btn_layout.add_widget(ResponsiveButton(text='ENREGISTRER', bg_color=COLORS['PRIMARY'], on_press=do_register))
-        btn_layout.add_widget(ResponsiveButton(text='ANNULER', bg_color=[0.6, 0.6, 0.6, 1], on_press=lambda x: popup.dismiss()))
-        content.add_widget(btn_layout)
-        
-        popup = Popup(title='', content=content, size_hint=(0.9, None), height=dp(400), auto_dismiss=False)
-        popup.open()
-    
-    def show_balance(self, instance):
-        self.show_popup('Info', 'Solde - À implémenter', 'SUCCESS')
-    
-    def show_stats(self, instance):
-        self.show_popup('Info', 'Statistiques - À implémenter', 'SUCCESS')
-    
-    def logout(self, instance):
-        App.get_running_app().current_user = None
-        self.manager.current = 'login'
-
-class MobileMoneyApp(App):
-    current_user = ObjectProperty(None, allownone=True)
-    
-    def build(self):
-        Window.clearcolor = COLORS['BACKGROUND']
-        DatabaseManager.init_database()
-        
-        sm = ScreenManager(transition=FadeTransition(duration=0.3))
-        sm.add_widget(LoginScreen(name='login'))
-        sm.add_widget(MenuScreen(name='menu'))
-        sm.add_widget(TransactionScreen(name='transaction'))
-        sm.add_widget(AdminMenuScreen(name='admin_menu'))
-        
-        return sm
-    
-    def on_pause(self):
-        return True
-
-if __name__ == '__main__':
-    MobileMoneyApp().run()
-ENDOFFILE
+        pip3 install --upgrade pip
+        pip3 install buildozer cython virtualenv
     
     - name: Create buildozer.spec
       run: |
-        cat > buildozer.spec << 'ENDOFFILE'
-[app]
-title = Mobile Money
-package.name = mobilemoney
-package.domain = org.mobilemoney.app
-source.dir = .
-source.include_exts = py
-version = 1.0.0
-requirements = python3,kivy==2.2.1,pillow,sqlite3
-orientation = portrait
-fullscreen = 0
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-android.api = 31
-android.minapi = 21
-android.ndk = 23b
-android.archs = arm64-v8a
-android.allow_backup = True
-android.supports_any_density = True
-
-[buildozer]
-log_level = 2
-warn_on_root = 0
-ENDOFFILE
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Mobile Money
+        package.name = mobilemoney
+        package.domain = org.mobilemoney.app
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas,ttf,db
+        version = 1.0.0
+        requirements = python3,kivy==2.3.0,pillow,pandas,numpy,pygal,cairosvg,lxml,cffi,tinycss2,cssselect,Pillow,kiwisolver
+        orientation = portrait
+        fullscreen = 0
+        android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+        android.api = 33
+        android.minapi = 21
+        android.sdk = 33
+        android.ndk = 25b
+        android.archs = arm64-v8a, armeabi-v7a
+        android.allow_backup = True
+        android.supports_any_density = True
+        android.presplash_color = #2196F3
+        
+        [buildozer]
+        log_level = 2
+        warn_on_root = 1
+        EOF
     
     - name: Build APK
       run: |
-        buildozer -v android debug 2>&1 | tee build.log
-      timeout-minutes: 90
+        set -o pipefail
+        buildozer android debug 2>&1 | tee build.log
+      timeout-minutes: 120
     
-    - name: Find and list APK files
-      run: |
-        echo "=== Recherche de l'APK ==="
-        find . -name "*.apk" -type f 2>/dev/null | head -20
-        echo "=== Contenu du dossier bin ==="
-        ls -la bin/ 2>/dev/null || echo "Dossier bin vide ou inexistant"
-        echo "=== Contenu de .buildozer ==="
-        find .buildozer -name "*.apk" 2>/dev/null | head -10
+    - name: List output directory
+      run: ls -la bin/ || true
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: mobile-money-apk
-        path: |
-          bin/*.apk
-          .buildozer/android/platform/build-*/dists/*/build/outputs/apk/debug/*.apk
-          .buildozer/android/platform/build-*/build/outputs/apk/debug/*.apk
+        path: bin/*.apk
         if-no-files-found: warn
-        retention-days: 7
+        retention-days: 5
     
-    - name: Upload logs
-      if: always()
+    - name: Upload logs on failure
+      if: failure()
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
         path: |
           build.log
-          buildozer.spec
-        retention-days: 3
+          .buildozer/android/platform/build-arm64-v8a_armeabi-v7a/build.log
+        retention-days: 5
